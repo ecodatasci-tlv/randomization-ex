@@ -1,0 +1,70 @@
+---
+title: "Wrangling categorical variables in R"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Explore the data
+
+```{r warning = FALSE, message = FALSE}
+library(tidyverse)
+pokemon <- read_csv("data/pokemon.csv")
+```
+
+- How many different types of pokemon are there?
+- How many body styles do they have?
+
+_WRITE YOUR ANSWERS HERE_
+
+_Hint:_ try using functions like `str()` or `summary()` to get an overview of the data. For a more comprehensive overview, try the `skimr` package.
+
+```{r eval = FALSE}
+# install.packages("skimr")
+library(skimr)
+skim(pokemon)
+```
+
+## Let's get graphing
+
+We can start by changing the `ggplot2` graphing defaults. If you set it once now, you don't have to add `+ theme_minimal()` or `+ scale_fill_viridis_c()` to your plots later on. 
+
+_Note:_ these settings do not always work for `ggpubr` graphs.
+
+```{r}
+# change the default theme
+theme_set(theme_minimal())
+
+# change the default colors
+options(ggplot2.continuous.colour = "viridis",
+        ggplot2.continuous.fill = "viridis")
+```
+
+How do you change the code below to match the [graph](https://ecodatasci-tlv.github.io/factors/#27) shown in the slides?
+
+```{r}
+# YOUR CODE HERE
+
+pokemon %>% 
+    # hint: add some mutates here to change the factor order
+    ggplot(aes(type_1)) +
+    geom_bar() + coord_flip()
+```
+
+How do you recreate the [graph](https://ecodatasci-tlv.github.io/factors/#31) shown in the second plotting exercise?
+
+```{r}
+# YOUR CODE HERE
+```
+
+## Discuss
+
+- How is `fct_infreq()` different from `fct_reorder()`? How are they similar?
+
+_WRITE YOUR ANSWER HERE_
+
+
+
