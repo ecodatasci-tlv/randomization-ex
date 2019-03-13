@@ -1,70 +1,225 @@
 ---
-title: "Wrangling categorical variables in R"
+title: "Null models and randomization"
 date: "`r Sys.Date()`"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+library(tidyverse)
+library(ggpubr)
+library(gam)
+library(caret)
+
+conflicted::conflict_prefer("filter", "dplyr")
+
+options(ggplot2.continuous.colour = "viridis",
+        ggplot2.continuous.fill = "viridis")
+
+theme_set(theme_minimal() +
+            theme(text = element_text(size = 20))) 
 ```
 
-## Explore the data
 
-```{r warning = FALSE, message = FALSE}
+## Make your randomization _reproducible_
+
+Run this code several times:
+
+```{r eval}
+set.seed(20180313)
+snacks <- c("pretzels", "cookies", "popcorn", "bamba", "carrots")
+sample(snacks, 3)
+```
+
+What happens when you run `set.seed()` each time? What happens when you only run the last line?
+
+## Distributions
+
+How would you use the density functions to create the plot shown in the slides, which has mean = 2 and SD = 1?
+
+```{r}
+# YOUR CODE HERE
+```
+
+Hint: Set the x-values to `seq(0, 5, by = 0.1)`
+
+## Null models
+
+```{r message=FALSE}
 library(tidyverse)
 pokemon <- read_csv("data/pokemon.csv")
 ```
 
-- How many different types of pokemon are there?
-- How many body styles do they have?
-
-_WRITE YOUR ANSWERS HERE_
-
-_Hint:_ try using functions like `str()` or `summary()` to get an overview of the data. For a more comprehensive overview, try the `skimr` package.
-
-```{r eval = FALSE}
-# install.packages("skimr")
-library(skimr)
-skim(pokemon)
-```
-
-## Let's get graphing
-
-We can start by changing the `ggplot2` graphing defaults. If you set it once now, you don't have to add `+ theme_minimal()` or `+ scale_fill_viridis_c()` to your plots later on. 
-
-_Note:_ these settings do not always work for `ggpubr` graphs.
+We can run a simple t-test:
 
 ```{r}
-# change the default theme
-theme_set(theme_minimal())
+pokemon <- pokemon %>%
+  mutate(color2 = if_else(color == "Grey", "Grey", "Not_grey"))
 
-# change the default colors
-options(ggplot2.continuous.colour = "viridis",
-        ggplot2.continuous.fill = "viridis")
+t.test(defense ~ color2, pokemon)
 ```
 
-How do you change the code below to match the [graph](https://ecodatasci-tlv.github.io/factors/#27) shown in the slides?
+But now let's do it with a null model instead!
+
+```{r}
+n_grey <- sum(pokemon$color2 == "Grey")
+pooled_obs <- pokemon$defense
+t <- vector(length = 10000)
+```
+
+This is our null model - for each iteration, we randomly sample our `pooled_obs` to create simulated `grey` and `not_grey` groups, then calculate a t-score. After running this process for `t` iterations, we get a null distribution of t-scores.
+
+```{r}
+for (i in 1:length(t)){
+  # sample WITHOUT replacement
+  grey_idx <- sample(length(pooled_obs), n_grey, 
+                     replace = FALSE)
+  
+  # create simulated grey & not_grey groups
+  grey <- pooled_obs[grey_idx] 
+  not_grey <- pooled_obs[-grey_idx]
+  
+  # calculate t-score
+  t[i] <- t.test(grey, not_grey)$statistic
+}
+```
+
+Now that we have a null distribution, we can calculate the **observed t-score** and **p-value**:
+
+```{r}
+poke_sum <- pokemon %>%
+   group_by(color2) %>%
+   summarise(
+     mean = mean(defense),
+     se = sd(defense) / sqrt(n())
+   )
+poke_sum
+
+obs <- (poke_sum$mean[2] - poke_sum$mean[1])/poke_sum$se[2]
+obs
+
+p.val <- sum(abs(t) >= abs(obs)) / length(t)
+p.val
+```
+
+Now let's visualize this. We'll plot the histogram of the null distribution, and mark our observed value with a red line: 
+
+```{r}
+tibble(scores = t, obs = obs) %>%
+  ggplot() +
+  geom_density(aes(scores)) + 
+  geom_vline(xintercept = obs, color = "red")
+```
+
+## Weighted sampling in null models
+
+```{r}
+grey_prop <- pokemon %>% 
+   filter(color2 == "Grey") %>%
+   count(type_1) %>% 
+   mutate(prop = n/sum(n))
+
+grey_prop
+```
+
+Let's add the proportions back into our data frame.
+
+```{r}
+pokemon <- left_join(pokemon, grey_prop, by = "type_1") %>% 
+  mutate(prop = replace_na(prop, 0))
+```
+
+...and then we can calculate our null distribution again, using weighted probabilities.  We'll store the null distributions in a new variable, `t2`. 
+
+```{r}
+n_grey <- sum(pokemon$color2 == "Grey")
+pooled_obs <- pokemon$defense
+t2 <- vector(length = 10000) 
+prop <- pokemon$prop 
+
+for (i in 1:length(t2)){
+  grey_idx <- sample(length(pooled_obs), n_grey, 
+                     replace = FALSE, 
+                     prob = prop) 
+  
+  grey <- pooled_obs[grey_idx] 
+  not_grey <- pooled_obs[-grey_idx]
+  
+  t2[i] <- t.test(grey, not_grey)$statistic
+}
+```
+
+We can plot this new distribution like we did before:
+
+```{r}
+tibble(scores = t2, obs = obs) %>%
+  ggplot() +
+  geom_density(aes(scores)) + 
+  geom_vline(xintercept = obs, color = "red")
+```
+
+And we can also compare it side-by-side:
 
 ```{r}
 # YOUR CODE HERE
+```
 
+## Cross-validation
+
+Which model best predicts the relationship between _attack_ and _special defense_ scores of Pokemon?
+
+```{r}
+# DO SOME DATA VISUALIZATION/EXPLORATION HERE
+```
+
+
+```{r}
+model1 <- lm(sp_def ~ attack, data = pokemon)
 pokemon %>% 
-    # hint: add some mutates here to change the factor order
-    ggplot(aes(type_1)) +
-    geom_bar() + coord_flip()
+    ggplot(aes(attack, sp_def)) +
+    geom_point() +
+    geom_smooth(method = "lm")
 ```
-
-How do you recreate the [graph](https://ecodatasci-tlv.github.io/factors/#31) shown in the second plotting exercise?
 
 ```{r}
-# YOUR CODE HERE
+model1.5 <- lm(sp_def ~ I(attack^2), data = pokemon)
+pokemon %>% 
+    ggplot(aes(attack, sp_def)) +
+    geom_point() +
+    geom_smooth(method = "lm", formula = y ~ I(x^2))
 ```
 
-## Discuss
+```{r}
+model2 <- gam(sp_def ~ lo(attack), data = pokemon)
+pokemon %>% 
+    ggplot(aes(attack, sp_def)) +
+    geom_point() +
+    geom_smooth(method = "loess")
+```
 
-- How is `fct_infreq()` different from `fct_reorder()`? How are they similar?
 
-_WRITE YOUR ANSWER HERE_
+```{r message=FALSE, warning=FALSE}
+train_control <- trainControl(method="cv", number=10)
 
+model1 <- train(sp_def ~ attack,
+                data = pokemon,
+                trControl = train_control,
+                method = "lm")
 
+model1.5 <- train(sp_def ~ I(attack^2),
+                  data = pokemon,
+                  trControl = train_control,
+                  method = "lm")
+
+model2 <- train(sp_def ~ attack,
+                data = pokemon,
+                trControl = train_control,
+                method = "gamLoess")
+```
+
+_train_ is the function to actually run the cross-validation process, using the control parameters we set up with _trainControl_.
+
+_method_ determines the model we use - there are many!
 
